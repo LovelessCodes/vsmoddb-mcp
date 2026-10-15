@@ -1,0 +1,60 @@
+{
+  "name": "vsmoddb-mcp",
+  "version": "0.1.0",
+  "description": "MCP server for the Vintage Story ModDB: publish releases, edit mod pages, and answer comments",
+  "type": "module",
+  "license": "MIT",
+  "author": "LovelessCodes <hello@loveless.codes>",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "vintage-story",
+    "vsmoddb",
+    "mods",
+    "modding",
+    "moddb"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LovelessCodes/vsmoddb-mcp.git"
+  },
+  "homepage": "https://github.com/LovelessCodes/vsmoddb-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/LovelessCodes/vsmoddb-mcp/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "bin": {
+    "vsmoddb-mcp": "dist/index.js",
+    "vsmoddb-mcp-login": "dist/login.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "login": "node dist/login.js",
+    "typecheck": "tsc --noEmit",
+    "smoke": "npm run build && node scripts/smoke.mjs",
+    "prepublishOnly": "npm run smoke"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "cheerio": "^1.2.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^7.0.2"
+  },
+  "optionalDependencies": {
+    "playwright": "^1.40.0"
+  }
+}
