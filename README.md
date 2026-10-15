@@ -50,7 +50,8 @@ Then point your MCP client at `dist/index.js` (see [Client setup](#client-setup)
 | `list_my_mods` | List the mods your account contributes to |
 | `get_mod` | Public mod metadata, links, stats and releases |
 | `update_mod` | Description (Markdown/HTML), summary, name, URL alias, links, side, tags |
-| `add_mod_tags` | Add tags via the v2 API (creates unknown tags) |
+| `list_tags` | The site-wide tag vocabulary (id, name, color) |
+| `add_mod_tags` | Add existing tags through the edit form; new ones need `create_missing: true` |
 | `upload_release` | Publish a new release (`confirm: true` required) |
 | `update_release` | Change a release's changelog / game versions / version |
 | `retract_release` | Retract a release with a public reason (`confirm: true` required) |
@@ -148,14 +149,16 @@ claude mcp add vsmoddb -- npx -y vsmoddb-mcp
 
 ModDB is a hybrid site, and so is this server:
 
-- **v2 API** for comments (create/edit/delete), release retraction, tags, and
+- **v2 API** for comments (create/edit/delete), release retraction, and
   notifications. Requests carry the `at` action token scraped from the site;
   when ModDB rejects it as stale the server re-reads it and retries once.
-- **Classic PHP forms** for release uploads and mod/release edits, because the
-  public API stubs those out. The server renders the real edit page, serializes
-  the form exactly like a browser, applies only your changes, and POSTs it back.
-  A `303` redirect means success; a `200` re-render is parsed for the site's
-  error messages and surfaced as a tool error.
+- **Classic PHP forms** for release uploads, mod/release edits and tag changes,
+  because the public API stubs those out (and because ModDB disables its
+  user-tags API with the shipped `DISABLE_USER_TAGS` default). The server
+  renders the real edit page, serializes the form exactly like a browser,
+  applies only your changes, and POSTs it back. A `303` redirect means success;
+  a `200` re-render is parsed for the site's error messages and surfaced as a
+  tool error.
 
 Release uploads are `multipart/form-data` with a single file field. Game mod
 identifiers/versions come from the zip's `modinfo.json`, so uploads require
@@ -178,6 +181,12 @@ identifiers/versions come from the zip's `modinfo.json`, so uploads require
 - Comment replies are plain Markdown converted to HTML server-side by this MCP
   server. There is deliberately no bulk-reply tool: the ModDB rules forbid
   spamming or bot-like behaviour, so keep replies human-approved and on-topic.
+- Tags are site-wide, not per-mod: `list_tags` returns the vocabulary, and
+  `add_mod_tags` (like the site's own edit page) refuses names that do not exist
+  yet unless you pass `create_missing: true` — otherwise a typo would silently
+  invent a new public tag. Creating tags goes through ModDB's user-tags API,
+  which the site currently disables (HTTP 503), so today only existing tags can
+  actually be applied.
 - Non-game-mod versions must match `n.n.n` (optionally `-rc.n`/`-pre.n`/`-dev.n`).
 - You need to be a team member with edit rights for anything you modify; other
   users' mods return a clear "no edit permission" error.

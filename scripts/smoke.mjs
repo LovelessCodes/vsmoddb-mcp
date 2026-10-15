@@ -41,6 +41,7 @@ const state = {
   rejectTokenOnce: true,
   loggedOut: false,
   failNextModPost: false,
+  userTagsDisabled: false, // ModDB ships with DISABLE_USER_TAGS=true
   requests: [],
 };
 
@@ -257,6 +258,16 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "GET" && pathname === "/edit/mod/" && url.searchParams.get("assetid") === "7") {
     return sendHtml(modEditPage());
   }
+  if (req.method === "GET" && pathname === "/api/tags") {
+    return sendJson({
+      statuscode: 200,
+      tags: [
+        { tagid: "10", name: "Utility", color: "#92C96AFF" },
+        { tagid: "11", name: "Library", color: "#92C96AFF" },
+        { tagid: "12", name: "Cosmetic", color: "#92C96AFF" },
+      ],
+    });
+  }
   if (req.method === "GET" && pathname === "/notifications") return sendHtml(notificationsPage());
 
   if (req.method === "POST" && pathname === "/edit/release/" && url.searchParams.get("modid") === "42") {
@@ -293,7 +304,8 @@ const server = http.createServer(async (req, res) => {
     return sendJson({ statuscode: 200 });
   }
   if (req.method === "POST" && pathname === "/api/v2/mods/42/tags") {
-    return sendJson({ statuscode: 200, added: url.searchParams.get("at") ? 2 : 0 });
+    if (state.userTagsDisabled) return sendJson({ error: "User tags are currently disabled." }, 503);
+    return sendJson({ statuscode: 200, added: 2 });
   }
   if (req.method === "POST" && pathname === "/api/v2/notifications/clear") {
     return sendJson({ statuscode: 200 });
@@ -655,12 +667,81 @@ try {
     failedSave.text,
   );
 
-  /* -------- tags via the v2 API -------- */
-  const addTags = await call("add_mod_tags", { mod: "testmod", tags: ["Automation", "Utility"] });
-  ok("add_mod_tags succeeds", addTags);
-  const tagPosts = requests("POST", "/api/v2/mods/42/tags");
-  check("add_mod_tags posts tags[] entries", tagPosts[0]?.bodyUtf8.startsWith("tags%5B%5D=Automation&tags%5B%5D=Utility"), tagPosts[0]?.bodyUtf8);
-  check("add_mod_tags sends the action token", tagPosts[0]?.query.get("at") === sessionAt(), String(tagPosts[0]?.query.get("at")));
+  /* -------- tags: vocabulary, edit-form apply, v2 create -------- */
+  const tagsList = await call("list_tags");
+  ok("list_tags succeeds", tagsList);
+  if (!tagsList.isError) {
+    const t = json(tagsList);
+    check("list_tags returns the site vocabulary", t.count === 3 && t.tags.map((x) => x.name).join() === "Utility,Library,Cosmetic", tagsList.text);
+    check("list_tags keeps ids and colors", t.tags[0].id === "10" && t.tags[0].color === "#92C96AFF", tagsList.text);
+  }
+
+  const formPostsBeforeRefusal = requests("POST", "/edit/mod/").length;
+  const missingTag = await call("add_mod_tags", { mod: "testmod", tags: ["Automation"] });
+  check(
+    "add_mod_tags refuses tags that do not exist yet",
+    missingTag.isError &&
+      /do not exist on ModDB: "Automation"/.test(missingTag.text) &&
+      /list_tags/.test(missingTag.text) &&
+      /create_missing: true/.test(missingTag.text),
+    missingTag.text,
+  );
+  check(
+    "add_mod_tags posts nothing when it refuses",
+    requests("POST", "/api/v2/mods/42/tags").length === 0 && requests("POST", "/edit/mod/").length === formPostsBeforeRefusal,
+    `${requests("POST", "/api/v2/mods/42/tags").length} v2 POSTs, ${requests("POST", "/edit/mod/").length}/${formPostsBeforeRefusal} form POSTs`,
+  );
+
+  const formPostsBefore = requests("POST", "/edit/mod/").length;
+  const existingTag = await call("add_mod_tags", { mod: "testmod", tags: ["Library", "library", "Utility"] });
+  ok("add_mod_tags accepts existing tags", existingTag);
+  if (!existingTag.isError) {
+    const t = json(existingTag);
+    check("add_mod_tags reports what it added", t.added.join() === "Library,Utility" && t.created.length === 0, existingTag.text);
+  }
+  const tagFormPosts = requests("POST", "/edit/mod/").slice(formPostsBefore);
+  check("add_mod_tags applies existing tags through the edit form", tagFormPosts.length === 1, `${tagFormPosts.length} POSTs`);
+  if (tagFormPosts.length === 1) {
+    const body = new URLSearchParams(tagFormPosts[0].bodyUtf8);
+    check(
+      "add_mod_tags merges with the current tag selection",
+      body.getAll("tagids[]").join() === "10,11",
+      body.getAll("tagids[]").join(),
+    );
+    check("add_mod_tags preserves the rest of the form", body.get("name") === "Test Mod" && body.get("text") === "<p>Hello</p>");
+    check("add_mod_tags sends the action token", body.get("at") === sessionAt(), String(body.get("at")));
+  }
+  check("add_mod_tags does not touch the v2 tags endpoint for existing tags", requests("POST", "/api/v2/mods/42/tags").length === 0);
+
+  state.userTagsDisabled = true; // ModDB's shipped default is DISABLE_USER_TAGS=true
+  const refusedCreate = await call("add_mod_tags", { mod: "testmod", tags: ["Automation"], create_missing: true });
+  check(
+    "add_mod_tags surfaces the disabled user-tags API",
+    refusedCreate.isError && /503/.test(refusedCreate.text) && /disabled site-wide/.test(refusedCreate.text),
+    refusedCreate.text,
+  );
+  const refusedV2Posts = requests("POST", "/api/v2/mods/42/tags");
+  check(
+    "add_mod_tags changes nothing when creating is refused",
+    refusedV2Posts.length === 1 &&
+      refusedV2Posts[0].bodyUtf8 === "tags%5B%5D=Automation" &&
+      requests("POST", "/edit/mod/").length === formPostsBefore + 1,
+    `${refusedV2Posts.length} v2 POSTs, ${requests("POST", "/edit/mod/").length}/${formPostsBefore + 1} form POSTs`,
+  );
+  state.userTagsDisabled = false;
+
+  const createdTag = await call("add_mod_tags", { mod: "testmod", tags: ["Automation", "Utility"], create_missing: true });
+  ok("add_mod_tags creates missing tags when the API is enabled", createdTag);
+  if (!createdTag.isError) {
+    const t = json(createdTag);
+    check("add_mod_tags reports created vs added", t.created.join() === "Automation" && t.added.join() === "Utility", createdTag.text);
+  }
+  const v2TagPosts = requests("POST", "/api/v2/mods/42/tags");
+  check(
+    "add_mod_tags posts only the missing names to v2",
+    v2TagPosts.length === 2 && v2TagPosts[1].bodyUtf8 === "tags%5B%5D=Automation",
+    v2TagPosts.map((r) => r.bodyUtf8).join(" | "),
+  );
 
   /* -------- notifications -------- */
   const notes = await call("list_notifications");

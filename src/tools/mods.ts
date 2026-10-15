@@ -154,37 +154,13 @@ export function registerModTools(server: McpServer): void {
           changes.push("side");
         }
 
-        const tagOptions = selectOptionsFromHtml(page.text, "tagids[]");
-        const tagIdByName = new Map<string, string>();
-        for (const option of tagOptions) {
-          const cleanLabel = option.label.replace(/\s*\(\d+\)\s*$/, "").trim().toLowerCase();
-          if (cleanLabel && !tagIdByName.has(cleanLabel)) tagIdByName.set(cleanLabel, option.value);
-        }
-        const resolveTagIds = (names: string[]): string[] => {
-          const unknown: string[] = [];
-          const ids: string[] = [];
-          for (const name of names) {
-            const id = tagIdByName.get(name.trim().toLowerCase());
-            if (id === undefined) unknown.push(name);
-            else if (!ids.includes(id)) ids.push(id);
-          }
-          if (unknown.length) {
-            throw new ModdbError(
-              `Unknown tag(s): ${unknown.join(", ")}. Tags must already exist on the ModDB (see the tag list on the mod edit page); use add_mod_tags to create new user-defined tags.`,
-            );
-          }
-          return ids;
-        };
-
         if (params.tags !== undefined) {
-          fields["tagids[]"] = resolveTagIds(params.tags);
+          fields["tagids[]"] = resolveFormTagIds(page.text, params.tags);
           changes.push("tags (replaced)");
         } else if (params.add_tags?.length || params.remove_tags?.length) {
-          const current = new Set(
-            (Array.isArray(fields["tagids[]"]) ? fields["tagids[]"] : fields["tagids[]"] ? [fields["tagids[]"] as string] : []) as string[],
-          );
-          for (const id of resolveTagIds(params.add_tags ?? [])) current.add(id);
-          for (const id of resolveTagIds(params.remove_tags ?? [])) current.delete(id);
+          const current = new Set(selectedValues(fields["tagids[]"]));
+          for (const id of resolveFormTagIds(page.text, params.add_tags ?? [])) current.add(id);
+          for (const id of resolveFormTagIds(page.text, params.remove_tags ?? [])) current.delete(id);
           fields["tagids[]"] = [...current];
           changes.push("tags");
         }
@@ -210,36 +186,154 @@ export function registerModTools(server: McpServer): void {
   );
 
   server.registerTool(
-    "add_mod_tags",
+    "list_tags",
     {
-      title: "Add tags to a mod",
+      title: "List ModDB tags",
       description:
-        "Add tags to a mod via the ModDB v2 API. Unlike update_mod's tag list, names that do not exist yet are created as new user-defined tags.",
-      annotations: { readOnlyHint: false },
-      inputSchema: {
-        mod: z.string().describe("Mod identifier: alias/name, numeric id, or ModDB URL/path (e.g. 'carrycapacity', '5894', '/show/mod/54807')"),
-        tags: z.array(z.string()).min(1).describe("Tag names to add"),
-      },
+        "List the site-wide tag vocabulary every mod can carry (id, name, color). Check this before add_mod_tags: only these names exist on ModDB, and anything else has to be created deliberately.",
+      annotations: { readOnlyHint: true },
+      inputSchema: {},
     },
-    async ({ mod, tags }) => {
+    async () => {
       try {
-        const info = await resolveMod(mod);
-        const res = await client.apiV2("POST", `/api/v2/mods/${info.modid}/tags`, {
-          form: { "tags[]": tags },
-        });
-        if (res.status !== 200) {
-          throw new ModdbError(`Adding tags failed (HTTP ${res.status}): ${errorFromResponse(res)}`, res.status);
-        }
-        let body: unknown = res.text;
-        try {
-          body = JSON.parse(res.text);
-        } catch {
-          // leave as text
-        }
-        return textResult(pretty({ ok: true, mod: info.name, added: tags, response: body }));
+        const data = await client.apiV1("/tags");
+        const tags = (Array.isArray(data?.tags) ? data.tags : [])
+          .map((tag: any) => ({ id: String(tag?.tagid ?? ""), name: String(tag?.name ?? ""), color: tag?.color }))
+          .filter((tag: { id: string; name: string }) => tag.id && tag.name);
+        return textResult(pretty({ count: tags.length, tags }));
       } catch (err) {
         return errorResult(err);
       }
     },
   );
+
+  server.registerTool(
+    "add_mod_tags",
+    {
+      title: "Add tags to a mod",
+      description:
+        "Add tags to a mod. Existing tags are applied through the mod edit form (the path the site's own UI uses), and only names from list_tags are accepted unless create_missing: true is passed. Tags are site-wide: brand-new ones can only be created through ModDB's user-tags API, which the site currently disables (HTTP 503).",
+      annotations: { readOnlyHint: false },
+      inputSchema: {
+        mod: z.string().describe("Mod identifier: alias/name, numeric id, or ModDB URL/path (e.g. 'carrycapacity', '5894', '/show/mod/54807')"),
+        tags: z.array(z.string()).min(1).describe("Tag names to add"),
+        create_missing: z
+          .boolean()
+          .default(false)
+          .describe("Also try to create tags that do not exist on ModDB yet (site-wide, visible to every user)"),
+      },
+    },
+    async ({ mod, tags, create_missing }) => {
+      try {
+        const info = await resolveMod(mod);
+
+        const wanted = normalizeTagNames(tags);
+        if (!wanted.length) throw new ModdbError("No tag names given.");
+
+        const known = await knownTagNames();
+        const missing = wanted.filter((name) => !known.has(name.toLowerCase()));
+        if (missing.length && !create_missing) {
+          throw new ModdbError(
+            `Tag(s) do not exist on ModDB: ${missing.map((name) => `"${name}"`).join(", ")}. ` +
+              "Tags are site-wide, so new ones would appear for every user. Run list_tags to pick existing names, " +
+              "or pass create_missing: true to attempt creating these.",
+          );
+        }
+
+        // Creating tags is a v2 API feature and the site has it switched off (503), so run it
+        // first: if it is refused, nothing has been changed yet.
+        if (missing.length) {
+          const res = await client.apiV2("POST", `/api/v2/mods/${info.modid}/tags`, { form: { "tags[]": missing } });
+          if (res.status !== 200) {
+            throw new ModdbError(
+              `Creating new tag(s) failed (HTTP ${res.status}): ${errorFromResponse(res)}` +
+                (res.status === 503
+                  ? " — ModDB has user-defined tags disabled site-wide right now, so only existing tags can be added."
+                  : ""),
+              res.status,
+            );
+          }
+        }
+
+        const existing = wanted.filter((name) => !missing.includes(name));
+        if (existing.length) {
+          const page = await client.getLoggedIn(`/edit/mod/?assetid=${info.assetid}`);
+          const fields = serializeForm(page.text, "form[name='form1']");
+          const current = new Set(selectedValues(fields["tagids[]"]));
+          for (const id of resolveFormTagIds(page.text, existing)) current.add(id);
+          fields["tagids[]"] = [...current];
+          const res = await client.postForm(`/edit/mod/?assetid=${info.assetid}`, fields);
+          assertFormSaveSucceeded(res, `Adding tags to "${info.name}"`);
+        }
+
+        return textResult(
+          pretty({
+            ok: true,
+            mod: info.name,
+            added: existing,
+            created: missing,
+            url: `${client.baseUrl}${info.urlalias ? `/${info.urlalias}` : `/show/mod/${info.assetid}`}`,
+          }),
+        );
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  );
+}
+
+/** Trim, drop empties and dedupe tag names case-insensitively, preserving order. */
+function normalizeTagNames(names: string[]): string[] {
+  const wanted: string[] = [];
+  for (const name of names) {
+    const clean = name.trim();
+    if (clean && !wanted.some((existing) => existing.toLowerCase() === clean.toLowerCase())) wanted.push(clean);
+  }
+  return wanted;
+}
+
+/** Selected option values from a serializeForm() result (single value or list). */
+function selectedValues(value: string | string[] | undefined): string[] {
+  if (Array.isArray(value)) return value;
+  return value ? [value] : [];
+}
+
+/** Map of lowercased tag label -> option value from the mod edit form's tag select. */
+function tagIdsByName(html: string, fieldName: string): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const option of selectOptionsFromHtml(html, fieldName)) {
+    const cleanLabel = option.label.replace(/\s*\(\d+\)\s*$/, "").trim().toLowerCase();
+    if (cleanLabel && !map.has(cleanLabel)) map.set(cleanLabel, option.value);
+  }
+  return map;
+}
+
+/** Resolve tag names against the mod edit form, throwing for names it does not offer. */
+function resolveFormTagIds(html: string, names: string[]): string[] {
+  const map = tagIdsByName(html, "tagids[]");
+  const unknown: string[] = [];
+  const ids: string[] = [];
+  for (const name of names) {
+    const id = map.get(name.trim().toLowerCase());
+    if (id === undefined) unknown.push(name);
+    else if (!ids.includes(id)) ids.push(id);
+  }
+  if (unknown.length) {
+    throw new ModdbError(
+      `Unknown tag(s): ${unknown.join(", ")}. ModDB's mod edit form does not offer ${
+        unknown.length > 1 ? "these names" : "this name"
+      } — run list_tags to see the accepted ones.`,
+    );
+  }
+  return ids;
+}
+
+/** Site-wide tag vocabulary, lowercased for comparison. */
+async function knownTagNames(): Promise<Set<string>> {
+  const data = await client.apiV1("/tags");
+  const names = new Set<string>();
+  for (const tag of Array.isArray(data?.tags) ? data.tags : []) {
+    if (typeof tag?.name === "string" && tag.name.trim()) names.add(tag.name.trim().toLowerCase());
+  }
+  return names;
 }
