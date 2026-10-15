@@ -16,6 +16,15 @@ npm install -g playwright && npx playwright install chromium   # browser for the
 vsmoddb-mcp-login                                              # one manual browser login (reCAPTCHA)
 ```
 
+Both commands are bins of this one package (`vsmoddb-mcp` runs the server,
+`vsmoddb-mcp-login` runs the login helper) — there is no separate login package.
+The helper also runs straight from the registry, without a global install:
+
+```bash
+npx playwright install chromium          # browser for the login helper, once
+npx -p vsmoddb-mcp vsmoddb-mcp-login     # one manual browser login (reCAPTCHA)
+```
+
 The login must be repeated roughly every two weeks; sessions cannot be renewed
 without a human because of the reCAPTCHA. Playwright is an optional dependency:
 without it, `vsmoddb-mcp-login` prints the exact commands to set it up and an
@@ -63,8 +72,11 @@ action token for every request, refreshing the token automatically.
 ```
 npm install playwright          # only needed for the login helper
 npx playwright install chromium # one-time browser download
-npm run login                   # or: vsmoddb-mcp-login, when installed from npm
+npm run login                   # from a checkout; global install: vsmoddb-mcp-login
 ```
+
+Without a global install, run the helper through npx:
+`npx -p vsmoddb-mcp vsmoddb-mcp-login`.
 
 This writes `~/.config/vsmoddb-mcp/session.json` (mode 0600) containing the
 `vs_websessionkey` cookie. Sessions last roughly two weeks; when they expire,
@@ -111,9 +123,12 @@ args. From a source checkout, point at the built file with an absolute path:
 }
 ```
 
-Note: `npx`/global installs do not include Playwright, so run the login helper
-once from a global install (`vsmoddb-mcp-login`) or from a source checkout
-(`npm run login`); the session file is shared by both.
+Note: the login helper needs the Playwright package and a Chromium build; the
+browser binaries are not bundled. Run the helper once from a global install
+(`vsmoddb-mcp-login`), from the registry without installing anything
+(`npx -p vsmoddb-mcp vsmoddb-mcp-login`), or from a source checkout
+(`npm run login`). All of them write the same session file, and an MCP server
+that is already running picks it up on the next tool call.
 
 Claude Code / CLI:
 
