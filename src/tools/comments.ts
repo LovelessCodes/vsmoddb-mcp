@@ -14,7 +14,7 @@ export function registerCommentTools(server: McpServer): void {
         "List comments on a mod's ModDB page, newest first. Accepts a mod name, numeric id, or URL alias. Returns comment ids for reply_to_comment, edit_comment and delete_comment.",
       annotations: { readOnlyHint: true },
       inputSchema: {
-        mod: z.string().describe("Mod identifier: numeric id, or URL alias / mod id string (e.g. 'carrycapacity')"),
+        mod: z.string().describe("Mod identifier: alias/name, numeric id, or ModDB URL/path (e.g. 'carrycapacity', '5894', '/show/mod/54807')"),
         limit: z.number().int().min(1).max(200).default(25).describe("Maximum number of comments to return (newest first)"),
         include_deleted: z.boolean().default(false).describe("Include comments that were hidden/deleted"),
       },
@@ -56,7 +56,7 @@ export function registerCommentTools(server: McpServer): void {
         "Post a reply to a comment on a mod's ModDB page. The text is Markdown (converted to HTML). Use only user-approved wording; the ModDB rules prohibit bot-like/spammy commenting.",
       annotations: { readOnlyHint: false },
       inputSchema: {
-        mod: z.string().describe("Mod identifier: numeric id, URL alias, or mod id string"),
+        mod: z.string().describe("Mod identifier: alias/name, numeric id, or ModDB URL/path (e.g. 'carrycapacity', '5894', '/show/mod/54807')"),
         comment_id: z.number().int().describe("Id of the comment to reply to (from list_comments)"),
         text: z.string().min(1).describe("Reply content in Markdown"),
       },

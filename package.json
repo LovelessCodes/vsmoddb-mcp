@@ -1,6 +1,6 @@
 {
   "name": "vsmoddb-mcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "MCP server for the Vintage Story ModDB: publish releases, edit mod pages, and answer comments",
   "type": "module",
   "license": "MIT",

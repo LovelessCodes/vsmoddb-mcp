@@ -13,7 +13,7 @@ export interface ScrapedUser {
  * for logged-in users. Returns nulls when the visitor is logged out.
  */
 export function scrapeUser(html: string): ScrapedUser | null {
-  const m = /window\.user=\{hash:(?:"([0-9a-f]+)"|null),at:(?:"([0-9a-f]+)"|null)/.exec(html);
+  const m = /window\.user=\{hash:(?:"([0-9a-fA-F]+)"|null),at:(?:"([0-9a-fA-F]+)"|null)/.exec(html);
   if (!m) return null;
   return { hash: m[1] ?? null, at: m[2] ?? null };
 }

@@ -9,7 +9,7 @@ import { registerNotificationTools } from "./tools/notifications.js";
 
 const server = new McpServer({
   name: "vsmoddb-mcp",
-  version: "0.1.0",
+  version: "0.1.1",
 });
 
 registerSessionTools(server);

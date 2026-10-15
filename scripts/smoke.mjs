@@ -48,14 +48,14 @@ const at = () => (state.homeLevel === 1 ? "a1" : "a2");
 
 const homePage = (level) =>
   `<!doctype html><html><head><title>ModDB</title></head><body>` +
-  `<script>window.user={hash:"deadbeef",at:"${level === 1 ? "a1" : "a2"}"};</script>` +
+  `<script>window.user={hash:"DEADBEEF",at:"${level === 1 ? "a1" : "a2"}"};</script>` +
   `<h3>Your mod contributions</h3>` +
   `<div class="mod"><a href="/testmod"><h4>Test Mod</h4><p>A smoke-test mod</p></a></div>` +
   `</body></html>`;
 
 const loggedOutPage = `<!doctype html><html><head><title>Vintage Story Game Account</title></head><body>login</body></html>`;
 
-const userScript = `<script>window.user={hash:"deadbeef",at:"${at()}"};</script>`;
+const userScript = `<script>window.user={hash:"DEADBEEF",at:"${at()}"};</script>`;
 
 const modJson = () => ({
   statuscode: 200,
@@ -174,6 +174,22 @@ const notificationsPage = () =>
   `<a href="/notification/76">New follower</a> joined</label>` +
   `</body></html>`;
 
+// Mod page served for an alias. The CSP lists the per-mod v2 endpoints, which is how the
+// server relates a URL alias back to a mod id (the public v1 API only knows release identifiers).
+const aliasModPage = () =>
+  `<!doctype html><html><head><title>Test Mod - Vintage Story Mod DB</title></head><body>${userScript}` +
+  `<a href="/edit/mod/?assetid=7">Edit this mod</a></body></html>`;
+
+// Mod page of an unpublished draft: absent from the public API, only the page knows about it.
+const draftModPage = () =>
+  `<!doctype html><html><head><title>Draft Mod - Vintage Story Mod DB</title></head><body>${userScript}` +
+  `<span>Draft</span><a href="/edit/mod/?assetid=77">Edit this mod</a></body></html>`;
+
+const csp = (modid) => ({
+  "content-type": "text/html; charset=utf-8",
+  "content-security-policy": `default-src 'self'; connect-src mods.vintagestory.at/api/v2/mods/${modid}/ mods.vintagestory.at/api/v2/comments/`,
+});
+
 function parseMultipart(bodyLatin1, boundary) {
   const parts = [];
   for (const chunk of bodyLatin1.split(`--${boundary}`)) {
@@ -224,10 +240,14 @@ const server = http.createServer(async (req, res) => {
   }
   if (req.method === "GET" && pathname.startsWith("/api/mod/")) {
     const ref = decodeURIComponent(pathname.slice("/api/mod/".length));
-    if (ref === "nonexistent") return sendJson({ statuscode: 404, error: "Mod not found" }, 404);
+    if (ref === "nonexistent" || ref === "testalias" || ref === "77") {
+      return sendJson({ statuscode: 404, error: "Mod not found" }, 404);
+    }
     return sendJson(modJson());
   }
   if (req.method === "GET" && pathname === "/testmod") return sendHtml(modPage());
+  if (req.method === "GET" && pathname === "/testalias") return send(200, aliasModPage(), csp(42));
+  if (req.method === "GET" && pathname === "/show/mod/77") return send(200, draftModPage(), csp(77));
   if (req.method === "GET" && pathname === "/edit/release/" && url.searchParams.get("modid") === "42") {
     return sendHtml(releaseCreatePage());
   }
@@ -326,13 +346,39 @@ const transport = new StdioClientTransport({
 await client.connect(transport);
 console.log(`mock ModDB at ${base}\n`);
 
+const pkgVersion = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")).version;
+check(
+  "server reports the package version",
+  client.getServerVersion()?.version === pkgVersion,
+  `server=${client.getServerVersion()?.version} package=${pkgVersion}`,
+);
+
 try {
+  /* -------- session hot reload: logging in while the server is already running -------- */
+  const parkedSession = fs.readFileSync(sessionFile, "utf8");
+  fs.rmSync(sessionFile);
+  const noSession = await call("moddb_status");
+  check(
+    "moddb_status explains how to log in when no session file exists",
+    noSession.isError &&
+      /No valid ModDB session is configured/.test(noSession.text) &&
+      /npm run login/.test(noSession.text),
+    noSession.text,
+  );
+  fs.writeFileSync(sessionFile, parkedSession);
+  const afterLogin = await call("moddb_status");
+  check(
+    "the running server picks up a session file that appears later",
+    !afterLogin.isError && json(afterLogin).user_hash === "DEADBEEF",
+    afterLogin.text,
+  );
+
   /* -------- session tools -------- */
   const status = await call("moddb_status");
   ok("moddb_status succeeds", status);
   if (!status.isError) {
     const s = json(status);
-    check("moddb_status reports the logged-in account", s.user_hash === "deadbeef", status.text);
+    check("moddb_status reports the logged-in account", s.user_hash === "DEADBEEF", status.text);
     check("moddb_status resolves the player name", s.player === "Smoke Tester", status.text);
     check("moddb_status points at the mock", s.base_url === base, status.text);
     check("moddb_status does not echo the action token", s.at === undefined && !/action token/i.test(status.text));
@@ -362,7 +408,27 @@ try {
     check("get_mod converts changelog html to text", g.releases[0].changelog === "First release", mod.text);
   }
   const missing = await call("get_mod", { mod: "nonexistent" });
-  check("get_mod reports API errors", missing.isError && /Mod not found/.test(missing.text), missing.text);
+  check("get_mod reports unresolvable mods", missing.isError && /Could not resolve mod/.test(missing.text), missing.text);
+  check(
+    "get_mod falls back to the mod page before giving up",
+    requests("GET", "/nonexistent").length >= 1,
+    `page lookups: ${requests("GET", "/nonexistent").length}`,
+  );
+  const aliasMod = await call("get_mod", { mod: "testalias" });
+  check(
+    "get_mod resolves URL aliases through the mod page",
+    !aliasMod.isError && json(aliasMod).modid === 42 && json(aliasMod).name === "Test Mod",
+    aliasMod.text,
+  );
+  const draftMod = await call("get_mod", { mod: "https://mods.vintagestory.at/show/mod/77" });
+  check(
+    "get_mod resolves unpublished drafts from the mod page",
+    !draftMod.isError &&
+      json(draftMod).modid === 77 &&
+      json(draftMod).assetid === 77 &&
+      /draft/i.test(json(draftMod).status_note ?? ""),
+    draftMod.text,
+  );
 
   /* -------- comments -------- */
   const comments = await call("list_comments", { mod: "42" });

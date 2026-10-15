@@ -65,7 +65,7 @@ export function registerReleaseTools(server: McpServer): void {
         "Upload and publish a new release (zip in, one release out). For game mods the identifier/version are auto-detected from the zip's modinfo.json, and game_versions must be provided. The uploaded file cannot be replaced afterwards, so verify the build first. Requires confirm: true.",
       annotations: { readOnlyHint: false, destructiveHint: true },
       inputSchema: {
-        mod: z.string().describe("Mod identifier: numeric id, URL alias, or mod id string"),
+        mod: z.string().describe("Mod identifier: alias/name, numeric id, or ModDB URL/path (e.g. 'carrycapacity', '5894', '/show/mod/54807')"),
         file_path: z.string().describe("Absolute path to the .zip (or .dll/.cs) to upload, on the machine running this server"),
         changelog: z.string().default("").describe("Changelog text in Markdown (optional but recommended)"),
         game_versions: z
@@ -163,7 +163,7 @@ export function registerReleaseTools(server: McpServer): void {
         "Update an existing release's changelog, compatible game versions, or (non-game mods only) version. The uploaded file itself can never be replaced. Provide at least one of changelog / game_versions / version.",
       annotations: { readOnlyHint: false },
       inputSchema: {
-        mod: z.string().describe("Mod identifier: numeric id, URL alias, or mod id string"),
+        mod: z.string().describe("Mod identifier: alias/name, numeric id, or ModDB URL/path (e.g. 'carrycapacity', '5894', '/show/mod/54807')"),
         release_id: z.number().int().describe("Release id (see get_mod)"),
         changelog: z.string().optional().describe("New changelog in Markdown (replaces the old changelog)"),
         game_versions: z
@@ -261,7 +261,7 @@ export function registerReleaseTools(server: McpServer): void {
         "Retract (mark as broken/withdrawn) a release with a reason. The release stays visible with a retraction notice and can no longer be edited. Requires confirm: true.",
       annotations: { readOnlyHint: false, destructiveHint: true },
       inputSchema: {
-        mod: z.string().describe("Mod identifier: numeric id, URL alias, or mod id string"),
+        mod: z.string().describe("Mod identifier: alias/name, numeric id, or ModDB URL/path (e.g. 'carrycapacity', '5894', '/show/mod/54807')"),
         release_id: z.number().int().describe("Release id (see get_mod)"),
         reason: z.string().min(1).describe("Public reason for the retraction"),
         confirm: z.boolean().default(false).describe("Must be true; retraction cannot be undone by authors"),

@@ -15,7 +15,7 @@ export function registerModTools(server: McpServer): void {
         "Fetch a mod's public ModDB metadata: ids, tags, links, stats and the release list (with release ids and compatible game versions). Accepts mod name, numeric id, or URL alias.",
       annotations: { readOnlyHint: true },
       inputSchema: {
-        mod: z.string().describe("Mod identifier: numeric id, URL alias, or mod id string (e.g. 'carrycapacity')"),
+        mod: z.string().describe("Mod identifier: alias/name, numeric id, or ModDB URL/path (e.g. 'carrycapacity', '5894', '/show/mod/54807')"),
         include_description: z.boolean().default(false).describe("Include the full description as plain text"),
         include_changelogs: z.boolean().default(false).describe("Include each release's changelog as plain text"),
         release_limit: z.number().int().min(1).max(100).default(20).describe("How many (newest) releases to list"),
@@ -54,6 +54,7 @@ export function registerModTools(server: McpServer): void {
             follows: info.follows,
             release_count: info.releases.length,
             releases,
+            status_note: info.note,
             description: include_description ? htmlToText(info.description_html) : undefined,
           }),
         );
@@ -71,7 +72,7 @@ export function registerModTools(server: McpServer): void {
         "Update a mod's ModDB page: description, summary, name, URL alias, links, side, and tags. Only the provided fields are changed; everything else (including team members, images, status) is preserved. 'description' REPLACES the whole description, so provide the full new text in Markdown. 'tags' replaces the full tag list; use add_tags/remove_tags for incremental changes.",
       annotations: { readOnlyHint: false },
       inputSchema: {
-        mod: z.string().describe("Mod identifier: numeric id, URL alias, or mod id string"),
+        mod: z.string().describe("Mod identifier: alias/name, numeric id, or ModDB URL/path (e.g. 'carrycapacity', '5894', '/show/mod/54807')"),
         description: z.string().optional().describe("Full new description in Markdown (replaces the current description)"),
         description_html: z.string().optional().describe("Full new description as raw HTML (takes precedence over 'description')"),
         summary: z.string().max(100).optional().describe("New short summary (max 100 chars)"),
@@ -216,7 +217,7 @@ export function registerModTools(server: McpServer): void {
         "Add tags to a mod via the ModDB v2 API. Unlike update_mod's tag list, names that do not exist yet are created as new user-defined tags.",
       annotations: { readOnlyHint: false },
       inputSchema: {
-        mod: z.string().describe("Mod identifier: numeric id, URL alias, or mod id string"),
+        mod: z.string().describe("Mod identifier: alias/name, numeric id, or ModDB URL/path (e.g. 'carrycapacity', '5894', '/show/mod/54807')"),
         tags: z.array(z.string()).min(1).describe("Tag names to add"),
       },
     },

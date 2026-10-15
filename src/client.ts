@@ -4,7 +4,7 @@ import { loginInstructions, loadSession, saveSession, sessionFilePath, type Sess
 import { extractMessages, isLoginPage, scrapeUser } from "./html.js";
 
 const DEFAULT_BASE = "https://mods.vintagestory.at";
-const USER_AGENT = "vsmoddb-mcp/0.1.0 (+https://mods.vintagestory.at)";
+const USER_AGENT = "vsmoddb-mcp (+https://github.com/LovelessCodes/vsmoddb-mcp)";
 
 export class SessionExpiredError extends Error {}
 
@@ -158,7 +158,24 @@ export class ModdbClient {
   }
 
   /** Validates the session cookie and returns the current action token, caching it. */
+  /**
+   * Re-reads the session file so a login that happened while this server was running
+   * (`vsmoddb-mcp-login`, or a hand-written file) is picked up without a client restart.
+   */
+  private refreshSession(): void {
+    const loaded = loadSession() ?? { cookie: "" };
+    if (loaded.cookie !== this.session.cookie) {
+      // A different session key invalidates the action token and user hash cached for the old one.
+      this.at = undefined;
+      this.hash = undefined;
+    }
+    this.session = loaded;
+    this.at = this.at ?? loaded.at;
+    this.hash = this.hash ?? loaded.hash;
+  }
+
   async ensureSession(force = false): Promise<{ hash: string; at: string }> {
+    this.refreshSession();
     if (!this.session.cookie) throw new SessionExpiredError(loginInstructions());
     if (!force && this.at && this.hash) return { hash: this.hash, at: this.at };
 

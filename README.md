@@ -69,7 +69,8 @@ npm run login                   # or: vsmoddb-mcp-login, when installed from npm
 This writes `~/.config/vsmoddb-mcp/session.json` (mode 0600) containing the
 `vs_websessionkey` cookie. Sessions last roughly two weeks; when they expire,
 every tool returns "Your ModDB session has expired" with the same instructions,
-so you just run `npm run login` again.
+so you just run `npm run login` again. A server that is already running picks up
+the new session file on the next tool call — no client restart needed.
 
 No browser at all? Log in at mods.vintagestory.at in your own browser, copy the
 `vs_websessionkey` cookie value from devtools, and create the file manually:
@@ -154,6 +155,11 @@ identifiers/versions come from the zip's `modinfo.json`, so uploads require
   40 MB by default.
 - `update_mod`'s `description` **replaces** the entire description — ask the
   model to fetch the current one first (`get_mod` with `include_description`).
+- Every `mod` parameter takes an alias (`carrycapacity`), a numeric id, or a
+  ModDB URL/path copied from the browser (`/show/mod/54807`). The public API
+  only knows published mods, so aliases, asset ids and unpublished drafts are
+  resolved through the mod page; drafts work with the editing tools, but have no
+  description/release/stats data until they are published.
 - Comment replies are plain Markdown converted to HTML server-side by this MCP
   server. There is deliberately no bulk-reply tool: the ModDB rules forbid
   spamming or bot-like behaviour, so keep replies human-approved and on-topic.
@@ -173,7 +179,7 @@ npm run smoke      # offline end-to-end test (no credentials, no network)
 real MCP server at it via `VSMODDB_BASE_URL`, drives all 14 tools over stdio
 with the MCP SDK client, and asserts the wire format — exact `Content-Type:
 text/html` for comment bodies, multipart fields for uploads, action-token
-refresh on `403 Invalid action token`, and session-expiry handling (96 checks).
+refresh on `403 Invalid action token`, and session-expiry handling (102 checks).
 
 ### Releasing
 
